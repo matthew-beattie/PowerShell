@@ -13,7 +13,7 @@ Param(
 [String]$scriptPath     = Split-Path($myinvocation.mycommand.path)
 [String]$scriptSpec     =  $MyInvocation.MyCommand.Definition
 [String]$scriptBaseName = (Get-Item $scriptSpec).BaseName
-[String]$fileSpec       = "$scriptPath\presets.xml"
+[String]$fileSpec       = "$scriptPath\zapi.xml"
 [String]$moduleName     = "DataONTAP"
 #'------------------------------------------------------------------------------
 #'Load the PSTK.
@@ -28,11 +28,23 @@ Try{
    Break;
 }
 #'------------------------------------------------------------------------------
+#'Connect to the Cluster.
+#'------------------------------------------------------------------------------
+Try{
+   [String]$command = "Connect-NcController -Name $Cluster -HTTPS -ErrorAction Stop | Out-Null"
+   Invoke-Expression -Command $command -ErrorAction Stop
+   Write-Host "Executed Command`: $command"
+}Catch{
+   Write-Warning -Message $("Failed Executing Command`: $command. Error " + $_.Exception.Message)
+   Write-Warning -Message "Failed Connecting to cluster ""$Cluster"""
+   Break;
+}
+#'------------------------------------------------------------------------------
 #'Ensure the zapi.xml file exists and read the content.
 #'------------------------------------------------------------------------------
 If(Test-Path -Path $fileSpec){
    Try{
-      [String]$command = "Get-Content -Path '$scriptPath\presets.xml' -ErrorAction Stop"
+      [String]$command = "Get-Content -Path '$fileSpec' -ErrorAction Stop"
       $xml = Invoke-Expression -Command $command -ErrorAction Stop
       Write-Host "Executed Command`: $command"
    }Catch{
@@ -41,6 +53,7 @@ If(Test-Path -Path $fileSpec){
    }
 }Else{
    Write-Warning -Message "The file '$fileSpec' does not exist"
+   Break;
 }
 #'------------------------------------------------------------------------------
 #'Create an XML object and load the ZAPI XML.
@@ -52,11 +65,10 @@ $request.LoadXml($xml)
 #'------------------------------------------------------------------------------
 Try{
    $command = "Invoke-NcSystemApi `$request -ErrorAction Stop"
-   Invoke-Expression -Command $command -ErrorAction Stop
+   $response = Invoke-Expression -Command $command -ErrorAction Stop
    Write-Host "Executed Command`: $command"
 }Catch{
    Write-Warning -Message $("Failed Executing Command`: $command. Error " + $_.Exception.Message)
    Break;
 }
 $response.results
-#'------------------------------------------------------------------------------
