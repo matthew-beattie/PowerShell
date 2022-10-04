@@ -73,6 +73,30 @@ Function Write-Log{
    }
 }#'End Function Write-Log.
 #'------------------------------------------------------------------------------
+Function Connect-OntapCluster{
+   Param(
+      [Parameter(Mandatory=$True, HelpMessage="The destination cluster name or IP Address")]
+      [String]$Cluster,
+      [Parameter(Mandatory = $True, HelpMessage = "The Credentials to authenticate to the Cluster")]
+      [System.Management.Automation.PSCredential]$Credential
+   )
+   #'---------------------------------------------------------------------------
+   #'Connect to the cluster if required.
+   #'---------------------------------------------------------------------------
+   If([String]::IsNullOrEmpty($global:CurrentNcController.Name)){
+      [String]$command = "Connect-NcController -Name $Cluster -HTTPS -Credential `$Credential -ErrorAction Stop"
+      Try{
+         Invoke-Expression -Command $command -ErrorAction Stop | Out-Null
+         Write-Log -Info -Message "Executed Command`: $command"
+         Write-Log -Info -Message $("Connect to cluster ""$Cluster"" as user """ + $Credential.Username + """")
+      }Catch{
+         Write-Log -Error -Message "Failed Executing Command`: $command"
+         Return $False;
+      }
+   }
+   Return $True;
+}#'End Function Connect-OntapCluster.
+#'------------------------------------------------------------------------------
 Function Get-OntapCredential{
    [CmdletBinding()]
    Param(
@@ -129,6 +153,7 @@ Function Get-ClusterCredential{
    Do{
       $valid        = $False
       $errorMessage = $Null
+      $response     = $Null
       $credential   = $host.ui.promptForCredential("Connect to cluster $Cluster", $credentialPrompt, $userName, "")
       #'------------------------------------------------------------------------
       #'Verify the credentials prompt wasn't bypassed.
@@ -178,6 +203,19 @@ Function Get-ClusterCredential{
                $errorCount++
             }
             #'------------------------------------------------------------------
+            #'Check authentication for the local account using the PSTK.
+            #'------------------------------------------------------------------
+            If($Null -eq $response){
+               $valid = Connect-OntapCluster -Cluster $Cluster -Credential $credential
+               If($valid){
+                  $response     = $True
+                  $errorMessage = $Null
+               }Else{
+                  $errorMessage = $("Failed connecting to cluster ""$Cluster"" as user """ + $credential.UserName + """")
+                  $errorCount++
+               }
+            }
+            #'------------------------------------------------------------------
             #'If there wasn't a failure talking to the domain test the validation of the credentials, and if it fails record a failure message.
             #'------------------------------------------------------------------
             If(-Not($errorMessage)){
@@ -202,7 +240,6 @@ Function Get-ClusterCredential{
       If($errorMessage){
          Write-Log -Error "$errorMessage"
          $attempts++
-         $errorCount++
          If($Attempt -lt $MaxAttempts){
             $credentialPrompt = "Authentication Error. Please try again (attempt $attempts out of $MaxAttempts):"
          }ElseIf($Attempt -eq $MaxAttempts) {
@@ -304,6 +341,18 @@ If(-Not(Test-Path -Path "$scriptPath\Logs")){
    }
 }
 #'------------------------------------------------------------------------------
+#'Import the PSTK.
+#'------------------------------------------------------------------------------
+[String]$moduleName = "NetApp.ONTAP"
+[String]$command    = "Import-Module '$moduleName' -ErrorAction Stop"
+Try{
+   Invoke-Expression -Command $command -ErrorAction Stop
+   Write-Log -Info -Message "Executed Command`: $command"   
+}Catch{
+   Write-Log -Error -Message "Failed Executing Command`: $command"
+   Throw "Failed Importing Module ""$moduleName"""
+}
+#'------------------------------------------------------------------------------
 #'Enumerate and validate credential authentication to the cluster.
 #'------------------------------------------------------------------------------
 $credential = Get-OntapCredential -Cluster $Cluster
@@ -323,6 +372,14 @@ If($Null -ne $response){
    [String]$version = $($response.generation.ToString() + "." + $response.major.ToString())
    If($Null -ne $response.minor){
       [String]$version += $("." + $response.minor.ToString())
+   }
+   Write-Log -Info -Message "Cluster ""$Cluster"" is running ONTAP version ""$version"""
+}Else{
+   Try{
+      [String]$version = (Get-NcSystemVersion).Value.Split(":")[0].Split(" ")[2]
+   }Catch{
+      Write-Log -Error -Message "Failed Enumerating ONTAP version for cluster ""$Cluster"""
+      Break;
    }
    Write-Log -Info -Message "Cluster ""$Cluster"" is running ONTAP version ""$version"""
 }
